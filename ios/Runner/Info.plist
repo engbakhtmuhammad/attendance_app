@@ -66,5 +66,13 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera is required to scan QR codes for attendance marking.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Local network access is required to connect to the attendance server on the same hotspot.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_attendance._tcp</string>
+	</array>
 </dict>
 </plist>
