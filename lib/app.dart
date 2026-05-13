@@ -13,6 +13,7 @@ import 'features/admin/screens/manage_classes_screen.dart';
 import 'features/admin/screens/create_class_screen.dart';
 import 'features/admin/screens/live_attendance_screen.dart';
 import 'features/admin/screens/pending_users_screen.dart';
+import 'features/admin/screens/manage_students_screen.dart';
 import 'features/admin/screens/export_screen.dart';
 import 'features/student/screens/student_connect_screen.dart';
 import 'features/student/screens/student_login_screen.dart';
@@ -34,6 +35,7 @@ final _router = GoRouter(
           LiveAttendanceScreen(classId: state.pathParameters['classId']!),
     ),
     GoRoute(path: '/admin/pending', builder: (ctx, _) => const PendingUsersScreen()),
+    GoRoute(path: '/admin/students', builder: (ctx, _) => const ManageStudentsScreen()),
     GoRoute(path: '/admin/export', builder: (ctx, _) => const ExportScreen()),
     GoRoute(path: '/student/connect', builder: (ctx, _) => const StudentConnectScreen()),
     GoRoute(path: '/student/login', builder: (ctx, _) => const StudentLoginScreen()),

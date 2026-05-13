@@ -1,5 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
+import '../../core/utils/crypto_util.dart';
+import '../../models/admin_model.dart';
 import '../../models/user_model.dart';
 import '../../models/class_model.dart';
 import '../../models/attendance_model.dart';
@@ -20,12 +22,30 @@ class DbHelper {
     final fullPath = p.join(dbPath, 'attendance.db');
     return openDatabase(
       fullPath,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
   Future<void> _onCreate(Database db, int version) async {
+    await db.execute('''
+      CREATE TABLE admins (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        pin_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    // Seed default admin (PIN: 2068)
+    await db.insert('admins', {
+      'id': 'admin',
+      'name': 'Admin',
+      'pin_hash': CryptoUtil.sha256Hash('2068'),
+      'created_at': DateTime.now().toIso8601String(),
+    });
+
     await db.execute('''
       CREATE TABLE users (
         id TEXT PRIMARY KEY,
@@ -61,6 +81,50 @@ class DbHelper {
         FOREIGN KEY (class_id) REFERENCES classes(id)
       )
     ''');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS admins (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          pin_hash TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      ''');
+      await db.insert(
+        'admins',
+        {
+          'id': 'admin',
+          'name': 'Admin',
+          'pin_hash': CryptoUtil.sha256Hash('2068'),
+          'created_at': DateTime.now().toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+  }
+
+  // ─── Admins ────────────────────────────────────────────────────────────────
+
+  Future<void> insertAdmin(AdminModel admin) async {
+    final db = await database;
+    await db.insert('admins', admin.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<AdminModel?> getAdminById(String id) async {
+    final db = await database;
+    final rows = await db.query('admins', where: 'id = ?', whereArgs: [id]);
+    if (rows.isEmpty) return null;
+    return AdminModel.fromMap(rows.first);
+  }
+
+  Future<List<AdminModel>> getAllAdmins() async {
+    final db = await database;
+    final rows = await db.query('admins', orderBy: 'created_at ASC');
+    return rows.map(AdminModel.fromMap).toList();
   }
 
   // ─── Users ────────────────────────────────────────────────────────────────

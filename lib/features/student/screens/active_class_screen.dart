@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import '../../../core/constants/app_constants.dart';
 import '../../../providers/student_provider.dart';
 import '../../../services/api_client.dart';
 
@@ -12,25 +15,42 @@ class ActiveClassScreen extends StatefulWidget {
 }
 
 class _ActiveClassScreenState extends State<ActiveClassScreen> {
+  Timer? _poller;
   Map<String, dynamic>? _classInfo;
   bool _loading = true;
+  bool _marking = false;
+  String? _markedClassId;
   String? _error;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _poller = Timer.periodic(AppConstants.pollInterval, (_) {
+      if (mounted) {
+        _load(showLoading: false);
+      }
+    });
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  @override
+  void dispose() {
+    _poller?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     final sp = context.read<StudentProvider>();
     if (sp.serverIp == null) {
       setState(() {
         _error = 'Not connected';
+        _classInfo = null;
         _loading = false;
       });
       return;
@@ -38,14 +58,77 @@ class _ActiveClassScreenState extends State<ActiveClassScreen> {
     try {
       final res = await ApiClient(serverIp: sp.serverIp!).getActiveClass();
       if (res['statusCode'] == 200) {
-        setState(() => _classInfo = res);
+        await sp.setSessionToken(res['sessionToken'] as String?);
+        if (!mounted) return;
+        setState(() {
+          _classInfo = res;
+          _error = null;
+          if (_markedClassId != res['classId']) {
+            _markedClassId = null;
+          }
+        });
       } else {
-        setState(() => _error = res['error'] ?? 'No active session');
+        await sp.setSessionToken(null);
+        if (!mounted) return;
+        setState(() {
+          _classInfo = null;
+          _error = res['error'] ?? 'No active session';
+        });
       }
     } catch (e) {
-      setState(() => _error = 'Connection error');
+      if (!mounted) return;
+      setState(() {
+        _classInfo = null;
+        _error = 'Connection error';
+      });
     }
+    if (!mounted) return;
     setState(() => _loading = false);
+  }
+
+  Future<void> _markAttendance() async {
+    if (_marking) return;
+
+    final sp = context.read<StudentProvider>();
+    final token = sp.sessionToken;
+    if (sp.serverIp == null || token == null || token.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No active attendance session is available right now.')),
+      );
+      return;
+    }
+
+    setState(() => _marking = true);
+    try {
+      final client = ApiClient(serverIp: sp.serverIp!, sessionToken: token);
+      final res = await client.markAttendance(userId: sp.userId!, deviceId: sp.deviceId!);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['message'] as String? ?? res['error'] as String? ?? 'Attendance updated.'),
+          backgroundColor: res['statusCode'] == 200
+              ? Colors.green
+              : Theme.of(context).colorScheme.error,
+        ),
+      );
+      if (res['statusCode'] == 200) {
+        setState(() => _markedClassId = _classInfo?['classId'] as String?);
+      } else {
+        await _load(showLoading: false);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not mark attendance. $e'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _marking = false);
+      }
+    }
   }
 
   @override
@@ -53,6 +136,7 @@ class _ActiveClassScreenState extends State<ActiveClassScreen> {
     final cs = Theme.of(context).colorScheme;
     final sp = context.watch<StudentProvider>();
     return Scaffold(
+      backgroundColor: cs.surfaceContainerLowest,
       appBar: AppBar(
         title: const Text('Active Session'),
         backgroundColor: cs.surface,
@@ -69,7 +153,7 @@ class _ActiveClassScreenState extends State<ActiveClassScreen> {
         ],
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -77,6 +161,9 @@ class _ActiveClassScreenState extends State<ActiveClassScreen> {
               Card(
                 color: cs.primaryContainer,
                 elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
                 child: Padding(
                   padding: const EdgeInsets.all(20),
                   child: Row(
@@ -120,9 +207,19 @@ class _ActiveClassScreenState extends State<ActiveClassScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 18),
+              Text(
+                'Today\'s Attendance',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              const SizedBox(height: 10),
               if (_loading)
-                const Center(child: CircularProgressIndicator())
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Center(child: CircularProgressIndicator()),
+                )
               else if (_error != null) ...[
                 Card(
                   color: cs.errorContainer,
@@ -148,21 +245,40 @@ class _ActiveClassScreenState extends State<ActiveClassScreen> {
                 ),
               ] else if (_classInfo != null) ...[
                 _ClassInfoCard(info: _classInfo!),
-                const Spacer(),
+                const SizedBox(height: 18),
                 FilledButton.icon(
-                  onPressed: () => context.push('/student/mark'),
+                  onPressed: _marking || _markedClassId == _classInfo?['classId']
+                      ? null
+                      : _markAttendance,
                   icon: const Icon(Icons.how_to_reg_rounded),
-                  label: const Text('Mark Attendance'),
+                  label: Text(
+                    _marking
+                        ? 'Marking Attendance...'
+                        : _markedClassId == _classInfo?['classId']
+                            ? 'Attendance Marked'
+                            : 'Mark Attendance Now',
+                  ),
                   style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 50),
                     backgroundColor: Colors.green,
                     foregroundColor: Colors.white,
                   ),
                 ),
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
-                  onPressed: _load,
-                  icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('Refresh'),
+                  onPressed: () => context.push('/student/mark'),
+                  style: OutlinedButton.styleFrom(minimumSize: const Size(0, 50)),
+                  icon: const Icon(Icons.qr_code_scanner_rounded),
+                  label: const Text('Use QR Scanner'),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'You can mark attendance once per active class session.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: cs.outline),
                 ),
               ],
             ],
@@ -215,9 +331,6 @@ class _ClassInfoCard extends StatelessWidget {
               value:
                   '${info['startTime']} – ${info['endTime']}',
             ),
-            const SizedBox(height: 6),
-            _InfoRow(
-                icon: Icons.tag_rounded, value: 'Class ID: ${info['classId']}'),
           ],
         ),
       ),

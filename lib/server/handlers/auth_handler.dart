@@ -2,47 +2,16 @@ import 'dart:convert';
 import 'package:shelf/shelf.dart';
 import '../../core/utils/crypto_util.dart';
 import '../../data/repositories/user_repository.dart';
-import '../../models/user_model.dart';
 
 class AuthHandler {
   final UserRepository _userRepo;
   AuthHandler({UserRepository? userRepo})
       : _userRepo = userRepo ?? UserRepository();
 
-  // POST /api/auth/register
+  // POST /api/auth/register — disabled; students are created by admin
   Future<Response> register(Request request) async {
-    try {
-      final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
-      final userId = (body['userId'] as String?)?.trim();
-      final name = (body['name'] as String?)?.trim();
-      final password = (body['password'] as String?)?.trim();
-      final deviceId = (body['deviceId'] as String?)?.trim();
-
-      if (userId == null || userId.isEmpty ||
-          name == null || name.isEmpty ||
-          password == null || password.isEmpty ||
-          deviceId == null || deviceId.isEmpty) {
-        return _json({'error': 'Missing required fields'}, 400);
-      }
-
-      final existing = await _userRepo.getById(userId);
-      if (existing != null) {
-        return _json({'error': 'User ID already taken'}, 409);
-      }
-
-      final user = UserModel(
-        id: userId,
-        name: name,
-        passwordHash: CryptoUtil.sha256Hash(password),
-        deviceId: deviceId,
-        status: 'pending',
-        createdAt: DateTime.now(),
-      );
-      await _userRepo.add(user);
-      return _json({'message': 'Registration submitted, awaiting approval'}, 201);
-    } catch (e) {
-      return _json({'error': 'Invalid request'}, 400);
-    }
+    return _json(
+        {'error': 'Self-registration is disabled. Contact your admin.'}, 403);
   }
 
   // POST /api/auth/login

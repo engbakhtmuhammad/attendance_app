@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'dart:async';
 import '../../../providers/class_provider.dart';
+import '../../../core/constants/app_constants.dart';
 import '../../../models/class_model.dart';
 
 class ManageClassesScreen extends StatefulWidget {
@@ -12,12 +14,25 @@ class ManageClassesScreen extends StatefulWidget {
 }
 
 class _ManageClassesScreenState extends State<ManageClassesScreen> {
+  Timer? _refreshTimer;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ClassProvider>().loadClasses();
     });
+    _refreshTimer = Timer.periodic(AppConstants.pollInterval, (_) {
+      if (mounted) {
+        context.read<ClassProvider>().loadClasses();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -41,26 +56,78 @@ class _ManageClassesScreenState extends State<ManageClassesScreen> {
       body: provider.loading
           ? const Center(child: CircularProgressIndicator())
           : provider.classes.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.class_outlined, size: 64, color: cs.outline),
-                      const SizedBox(height: 16),
-                      Text('No classes yet',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(color: cs.outline)),
-                      const SizedBox(height: 8),
-                      Text('Tap + to create one',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(color: cs.outline)),
-                    ],
-                  ),
-                )
+              ? (provider.activeClass != null
+                  ? ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+                      children: [
+                        Card(
+                          color: cs.primaryContainer,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Active Session',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelMedium
+                                        ?.copyWith(
+                                            color: cs.onPrimaryContainer,
+                                            fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 8),
+                                Text(provider.activeClass!.name,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                            color: cs.onPrimaryContainer,
+                                            fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    FilledButton.tonalIcon(
+                                      onPressed: () => context.push(
+                                          '/admin/live/${provider.activeClass!.id}'),
+                                      icon: const Icon(Icons.visibility_rounded),
+                                      label: const Text('Open Live Attendance'),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    FilledButton(
+                                      onPressed: () => provider.stopSession(),
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: cs.error,
+                                        foregroundColor: cs.onError,
+                                      ),
+                                      child: const Text('Stop'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.class_outlined, size: 64, color: cs.outline),
+                          const SizedBox(height: 16),
+                          Text('No classes yet',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(color: cs.outline)),
+                          const SizedBox(height: 8),
+                          Text('Tap + to create one',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(color: cs.outline)),
+                        ],
+                      ),
+                    ))
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
                   itemCount: provider.classes.length,

@@ -1,12 +1,16 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:uuid/uuid.dart';
+import '../../../core/constants/app_constants.dart';
 import '../../../data/repositories/attendance_repository.dart';
 import '../../../data/repositories/class_repository.dart';
 import '../../../data/repositories/user_repository.dart';
 import '../../../models/attendance_model.dart';
 import '../../../models/class_model.dart';
+import '../../../models/user_model.dart';
 import '../../../providers/class_provider.dart';
 
 class LiveAttendanceScreen extends StatefulWidget {
@@ -21,7 +25,9 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen> {
   final _attendanceRepo = AttendanceRepository();
   final _classRepo = ClassRepository();
   final _userRepo = UserRepository();
+  final _uuid = const Uuid();
 
+  Timer? _poller;
   List<AttendanceModel> _records = [];
   ClassModel? _class;
   bool _loading = true;
@@ -30,19 +36,27 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen> {
   void initState() {
     super.initState();
     _load();
+    _poller = Timer.periodic(AppConstants.pollInterval, (_) {
+      if (mounted) {
+        _load(showLoading: false);
+      }
+    });
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  @override
+  void dispose() {
+    _poller?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() => _loading = true);
+    }
     final classes = await _classRepo.getAll();
     _class = classes.where((c) => c.id == widget.classId).firstOrNull;
     _records = await _attendanceRepo.forClass(widget.classId);
     setState(() => _loading = false);
-
-    // Poll every 3 seconds
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) _load();
-    });
   }
 
   @override
@@ -55,6 +69,11 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen> {
         title: Text(_class?.name ?? 'Attendance'),
         backgroundColor: cs.surface,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.person_add_alt_1_rounded),
+            tooltip: 'Mark Manually',
+            onPressed: _markManualAttendance,
+          ),
           if (_class != null)
             IconButton(
               icon: const Icon(Icons.qr_code_rounded),
@@ -181,6 +200,134 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen> {
             const SizedBox(height: 24),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _markManualAttendance() async {
+    if (_class == null || !(_class!.isActive)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Start class session first.')),
+      );
+      return;
+    }
+
+    final approved = await _userRepo.getApproved();
+    final markedIds = _records.map((r) => r.userId).toSet();
+    final available = approved.where((u) => !markedIds.contains(u.id)).toList();
+
+    if (!mounted) return;
+
+    if (available.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('All approved students are already marked.')),
+      );
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Mark Attendance Manually',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 360),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: available.length,
+                itemBuilder: (_, i) => _ManualStudentTile(
+                  user: available[i],
+                  onTap: () => _confirmManualMark(available[i]),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmManualMark(UserModel user) async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Manual Attendance'),
+        content: Text('Mark ${user.name} (${user.id}) as present now?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Mark')),
+        ],
+      ),
+    );
+
+    if (proceed != true) return;
+
+    final already = await _attendanceRepo.userAlreadyMarked(user.id, widget.classId);
+    if (already) {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Student is already marked.')),
+      );
+      return;
+    }
+
+    await _attendanceRepo.add(
+      AttendanceModel(
+        id: _uuid.v4(),
+        userId: user.id,
+        deviceId: 'admin-manual-${user.id}',
+        classId: widget.classId,
+        timestamp: DateTime.now(),
+      ),
+    );
+
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    await _load(showLoading: false);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${user.name} marked present by admin.')),
+    );
+  }
+}
+
+class _ManualStudentTile extends StatelessWidget {
+  final UserModel user;
+  final VoidCallback onTap;
+
+  const _ManualStudentTile({required this.user, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        onTap: onTap,
+        leading: CircleAvatar(
+          backgroundColor: cs.primaryContainer,
+          child: Text(
+            user.name.isNotEmpty ? user.name[0].toUpperCase() : '?',
+            style: TextStyle(color: cs.onPrimaryContainer),
+          ),
+        ),
+        title: Text(user.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text('ID: ${user.id}'),
+        trailing: const Icon(Icons.how_to_reg_rounded),
       ),
     );
   }

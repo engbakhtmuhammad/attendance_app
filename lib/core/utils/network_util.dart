@@ -13,6 +13,15 @@ class NetworkUtil {
     }
   }
 
+  static Future<String?> getWifiGatewayIp() async {
+    try {
+      final info = NetworkInfo();
+      return await info.getWifiGatewayIP();
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<bool> isPortAvailable(int port) async {
     try {
       final server = await ServerSocket.bind(InternetAddress.anyIPv4, port,

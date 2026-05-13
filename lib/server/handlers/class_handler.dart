@@ -25,6 +25,7 @@ class ClassHandler {
       'date': cls.date,
       'startTime': cls.startTime,
       'endTime': cls.endTime,
+      'sessionToken': cls.sessionToken,
     });
   }
 

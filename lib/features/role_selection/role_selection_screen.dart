@@ -1,15 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../core/constants/app_constants.dart';
 
 class RoleSelectionScreen extends StatelessWidget {
   const RoleSelectionScreen({super.key});
-
-  Future<bool> _adminPinSet() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(AppConstants.kAdminPinHash) != null;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,13 +38,7 @@ class RoleSelectionScreen extends StatelessWidget {
                 subtitle: 'Manage classes & sessions',
                 color: cs.primaryContainer,
                 onColor: cs.onPrimaryContainer,
-                onTap: () async {
-                  final pinSet = await _adminPinSet();
-                  if (context.mounted) {
-                    context.push('/admin/pin',
-                        extra: {'setup': !pinSet});
-                  }
-                },
+                onTap: () => context.push('/admin/pin'),
               ),
               const SizedBox(height: 16),
               _RoleCard(
